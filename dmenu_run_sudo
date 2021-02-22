@@ -1,3 +1,3 @@
 #!/bin/sh
 export SUDO_ASKPASS="/usr/local/bin/dmenu_pass"
-exe=$(dmenu_path | dmenu "$@") && eval "exec sudo -A $exe"
+exe=$(dmenu_path | dmenu "$@" -p "sudo") && eval "exec sudo -A $exe"
