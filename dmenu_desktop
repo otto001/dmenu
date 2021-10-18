@@ -1,0 +1,23 @@
+#!/bin/sh
+
+DIRS=""
+
+if [ -d "$HOME/.local/share/applications" ]; then
+  DIRS="$DIRS $HOME/.local/share/applications"
+fi
+if [ -d "/usr/local/share/applications" ]; then
+  DIRS="$DIRS /usr/local/share/applications"
+fi
+if [ -d "/usr/share/applications" ]; then
+  DIRS="$DIRS /usr/share/applications"
+fi
+
+
+ENTRIES=$(grep -R -m1 "^Name=" $DIRS)
+RUN_NAME=$(printf '%s\n' "$ENTRIES" | cut -f1 -d"=" --complement | dmenu "$@")
+
+DESKTOP_FILE=$(printf '%s\n' "$ENTRIES" | grep "Name=$RUN_NAME" | cut -f1 -d":" )
+DESKTOP_FILENAME=$(basename "$DESKTOP_FILE")
+
+echo "$DESKTOP_FILENAME"
+gtk-launch "$DESKTOP_FILENAME"
