@@ -16,8 +16,15 @@ fi
 ENTRIES=$(grep -R -m1 "^Name=" $DIRS)
 RUN_NAME=$(printf '%s\n' "$ENTRIES" | cut -f1 -d"=" --complement | dmenu "$@")
 
-DESKTOP_FILE=$(printf '%s\n' "$ENTRIES" | grep "Name=$RUN_NAME" | cut -f1 -d":" )
-DESKTOP_FILENAME=$(basename "$DESKTOP_FILE")
+if [ -n "$RUN_NAME" ]; then
 
-echo "$DESKTOP_FILENAME"
-gtk-launch "$DESKTOP_FILENAME"
+  DESKTOP_FILE=$(printf '%s\n' "$ENTRIES" | grep "Name=$RUN_NAME" | cut -f1 -d":" )
+  DESKTOP_FILENAME=$(basename "$DESKTOP_FILE")
+
+
+  if [ -n "$DESKTOP_FILENAME" ]; then
+    echo "$DESKTOP_FILE"
+    gtk-launch "$DESKTOP_FILENAME"
+  fi
+
+fi
