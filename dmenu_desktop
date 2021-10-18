@@ -18,7 +18,7 @@ RUN_NAME=$(printf '%s\n' "$ENTRIES" | cut -f1 -d"=" --complement | sort | dmenu 
 
 if [ -n "$RUN_NAME" ]; then
 
-  DESKTOP_FILE=$(printf '%s\n' "$ENTRIES" | grep "Name=$RUN_NAME" | cut -f1 -d":" )
+  DESKTOP_FILE=$(printf '%s\n' "$ENTRIES" | grep -m1 "Name=$RUN_NAME$" | cut -f1 -d":" )
   DESKTOP_FILENAME=$(basename "$DESKTOP_FILE")
 
 
