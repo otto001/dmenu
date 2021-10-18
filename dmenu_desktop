@@ -14,7 +14,7 @@ fi
 
 
 ENTRIES=$(grep -R -m1 "^Name=" $DIRS)
-RUN_NAME=$(printf '%s\n' "$ENTRIES" | cut -f1 -d"=" --complement | sort | dmenu "$@")
+RUN_NAME=$(printf '%s\n' "$ENTRIES" | cut -f1 -d"=" --complement | sort | uniq | dmenu "$@")
 
 if [ -n "$RUN_NAME" ]; then
 
