@@ -8,6 +8,7 @@
 #include <strings.h>
 #include <time.h>
 #include <unistd.h>
+#include <float.h>
 
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
@@ -37,6 +38,8 @@ enum {
 
 struct item {
     char *text;
+    char *file;
+    char **keywords;
     struct item *left, *right;
     int out;
     double distance;
@@ -52,6 +55,7 @@ static struct item *items = NULL;
 static struct item *matches, *matchend;
 static struct item *prev, *curr, *next, *sel;
 static int mon = -1, screen;
+static int desktop = 0;
 
 static Atom clip, utf8;
 static Display *dpy;
@@ -77,6 +81,31 @@ appenditem(struct item *item, struct item **list, struct item **last) {
     item->left = *last;
     item->right = NULL;
     *last = item;
+}
+
+static void
+freeitem(struct item *item) {
+    char** keyword;
+
+    if (item->text) free(item->text);
+    if (item->file) free(item->file);
+    if (item->keywords) {
+        for (keyword = item->keywords; *keyword; keyword++) {
+            free(*keyword);
+        }
+        free(item->keywords);
+    }
+    if (item->left) {
+        if (item->right) {
+            item->left->right = item->right;
+            item->right->left = item->left;
+        } else {
+            item->left->right = NULL;
+        }
+    } else if (item->right) {
+        // this case should never happen, this is just a precaution to avoid segfaults in the future
+        item->right->left = NULL;
+    }
 }
 
 static void
@@ -230,6 +259,19 @@ grabkeyboard(void) {
 }
 
 int
+compare_text(const void *a, const void *b) {
+    struct item *da = *(struct item **) a;
+    struct item *db = *(struct item **) b;
+
+    if (!db)
+        return 1;
+    if (!da)
+        return -1;
+
+    return strcmp(da->text, db->text);
+}
+
+int
 compare_distance(const void *a, const void *b) {
     struct item *da = *(struct item **) a;
     struct item *db = *(struct item **) b;
@@ -242,48 +284,81 @@ compare_distance(const void *a, const void *b) {
     return da->distance == db->distance ? 0 : da->distance < db->distance ? -1 : 1;
 }
 
+int
+fuzzycompare(const char *itext, double *distance, double distanceoffset) {
+    char c;
+    int i, pidx, sidx, eidx;
+    int text_len = strlen(text), itext_len;
+    double newdistance;
+
+    itext_len = strlen(itext);
+    pidx = 0; /* pointer */
+    sidx = eidx = -1; /* start of match, end of match */
+    /* walk through item text */
+    for (i = 0; i < itext_len && (c = itext[i]); i++) {
+        /* fuzzy match pattern */
+        if (!fstrncmp(&text[pidx], &c, 1)) {
+            if (sidx == -1)
+                sidx = i;
+            pidx++;
+            if (pidx == text_len) {
+                eidx = i;
+                break;
+            }
+        }
+    }
+    /* build list of matches */
+    if (eidx != -1) {
+        /* compute distance */
+        /* add penalty if match starts late (log(sidx+2))
+         * add penalty for long a match without many matching characters 2*(eidx - sidx - text_len)
+         * add penalty for item texts longer than input log((itext_len - text_len) + 1)
+         * add distanceoffset*/
+
+        newdistance = log(sidx + 2) + (double) 2*(eidx - sidx - text_len + 1) + log((itext_len - text_len) + 2) + distanceoffset;
+        if (newdistance < *distance) {
+            *distance = newdistance;
+        }
+        /* fprintf(stderr, "distance %s %f\n", it->text, it->distance); */
+        return 1;
+    }
+    return 0;
+}
+
 void
 fuzzymatch(void) {
     /* bang - we have so much memory */
     struct item *it;
     struct item **fuzzymatches = NULL;
-    char c;
-    int number_of_matches = 0, i, pidx, sidx, eidx;
-    int text_len = strlen(text), itext_len;
+    char append = 0;
+    int number_of_matches = 0, i;
+    int text_len = strlen(text);
 
     matches = matchend = NULL;
 
     /* walk through all items */
     for (it = items; it && it->text; it++) {
+        it->distance = DBL_MAX;
         if (text_len) {
-            itext_len = strlen(it->text);
-            pidx = 0; /* pointer */
-            sidx = eidx = -1; /* start of match, end of match */
-            /* walk through item text */
-            for (i = 0; i < itext_len && (c = it->text[i]); i++) {
-                /* fuzzy match pattern */
-                if (!fstrncmp(&text[pidx], &c, 1)) {
-                    if (sidx == -1)
-                        sidx = i;
-                    pidx++;
-                    if (pidx == text_len) {
-                        eidx = i;
-                        break;
+            append = 0;
+            if (fuzzycompare(it->text, &it->distance, 0)) {
+                append = 1;
+            }
+
+            if (it->keywords) {
+                for (char** keyword = it->keywords; *keyword; keyword++) {
+                    if (fuzzycompare(*keyword, &it->distance, 1000) ) {
+                        append = 1;
                     }
                 }
             }
-            /* build list of matches */
-            if (eidx != -1) {
-                /* compute distance */
-                /* add penalty if match starts late (log(sidx+2))
-                 * add penalty for long a match without many matching characters */
-                it->distance = log(sidx + 2) + (double) (eidx - sidx - text_len);
-                /* fprintf(stderr, "distance %s %f\n", it->text, it->distance); */
+            if (append) {
                 appenditem(it, &matches, &matchend);
                 number_of_matches++;
             }
         } else {
             appenditem(it, &matches, &matchend);
+            number_of_matches++;
         }
     }
 
@@ -294,8 +369,14 @@ fuzzymatch(void) {
         for (i = 0, it = matches; it && i < number_of_matches; i++, it = it->right) {
             fuzzymatches[i] = it;
         }
-        /* sort matches according to distance */
-        qsort(fuzzymatches, number_of_matches, sizeof(struct item *), compare_distance);
+        if (text_len) {
+            /* sort matches according to distance */
+            qsort(fuzzymatches, number_of_matches, sizeof(struct item *), compare_distance);
+        } else {
+            /* sort matches according to text */
+            qsort(fuzzymatches, number_of_matches, sizeof(struct item *), compare_text);
+        }
+
         /* rebuild list of matches */
         matches = matchend = NULL;
         for (i = 0, it = fuzzymatches[i]; i < number_of_matches && it && \
@@ -597,7 +678,15 @@ keypress(XKeyEvent *ev) {
             break;
         case XK_Return:
         case XK_KP_Enter:
-            puts((sel && !(ev->state & ShiftMask)) ? sel->text : text);
+            if (ev->state & ShiftMask && !desktop) {
+                puts(text);
+            } else if (sel) {
+                if (desktop) {
+                    puts(sel->file);
+                } else {
+                    puts(sel->text);
+                }
+            }
             if (!(ev->state & ControlMask)) {
                 cleanup();
                 exit(0);
@@ -650,6 +739,69 @@ paste(void) {
     drawmenu();
 }
 
+static int
+getdekstopvalue(char *s, const char *key, char** val) {
+    int keylen = strlen(key);
+    if (!s || strncmp(s, key, keylen) != 0) return 0;
+    s += keylen;
+    for (;*s == ' '; s++) {}
+    if (*s != '=') return 0;
+    s++;
+    for (;*s == ' '; s++) {}
+    if (*s == 0) return 0;
+    *val = s;
+    return 1;
+}
+
+static int
+readdesktop(struct item* item) {
+    FILE *fp;
+    char *linebuf, *s, *tok;
+    int keywords = 0, desktopentry = 0;
+    size_t linebufsize = 128 * sizeof(char);
+
+    linebuf = ecalloc(linebufsize, sizeof(char));
+
+    fp = fopen(item->file, "r");
+    if (!fp)
+        die("cannot open file %s", item->file);
+
+    item->keywords = NULL;
+    item->text = NULL;
+
+    while ((getline(&linebuf, &linebufsize, fp)) != -1) {
+        if (!linebuf) continue;
+        if (!desktopentry) {
+            desktopentry = strstr(linebuf, "[Desktop Entry]") != NULL;
+            continue;
+        }
+        if (linebuf[0] == '[') break;
+
+        if (getdekstopvalue(linebuf, "Name", &s) && !(item->text = strndup(s, strlen(s)-1))) {
+            die("cannot strdup %u bytes:", strlen(s) + 1);
+        }
+        else if (getdekstopvalue(linebuf, "Keywords", &s)) {
+            tok = strtok(s, ";");
+            while (tok) {
+                keywords++;
+                item->keywords = realloc(item->keywords, keywords * sizeof (*item->keywords));
+                if (!(item->keywords[keywords-1] = strdup(tok))) {
+                    die("cannot strdup %u bytes:", strlen(s) + 1);
+                }
+                tok = strtok( NULL, ";");
+            }
+            item->keywords = realloc(item->keywords, (keywords+1)  * sizeof (*item->keywords));
+            item->keywords[keywords] = NULL;
+        } else if (getdekstopvalue(linebuf, "NoDisplay", &s)) {
+            if (strstr(s, "true")) {
+                return 0;
+            }
+        }
+    }
+    free(linebuf);
+    return 1;
+}
+
 static void
 readstdin(void) {
     char buf[sizeof text], *p;
@@ -668,8 +820,24 @@ readstdin(void) {
                 die("cannot realloc %u bytes:", size);
         if ((p = strchr(buf, '\n')))
             *p = '\0';
-        if (!(items[i].text = strdup(buf)))
-            die("cannot strdup %u bytes:", strlen(buf) + 1);
+
+        items[i].file = NULL;
+        items[i].text = NULL;
+        items[i].keywords = NULL;
+
+        if (desktop) {
+            if (!(items[i].file = strdup(buf)))
+                die("cannot strdup %u bytes:", strlen(buf) + 1);
+            if (!readdesktop(&items[i])) {
+                freeitem(&items[i]);
+                i--;
+                continue;
+            }
+        } else {
+            if (!(items[i].text = strdup(buf)))
+                die("cannot strdup %u bytes:", strlen(buf) + 1);
+        }
+
         items[i].out = 0;
         drw_font_getexts(drw->fonts, buf, strlen(buf), &tmpmax, NULL);
         if (tmpmax > inputw) {
@@ -843,6 +1011,8 @@ main(int argc, char *argv[]) {
             fast = 1;
         else if (!strcmp(argv[i], "-F"))   /* fuzzy */
             fuzzy = 1;
+        else if (!strcmp(argv[i], "-d"))   /* desktop entries */
+            desktop = 1;
         else if (!strcmp(argv[i], "-i")) { /* case-insensitive item matching */
             fstrncmp = strncasecmp;
             fstrstr = cistrstr;
