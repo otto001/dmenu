@@ -859,6 +859,12 @@ run(void) {
         if (XFilterEvent(&ev, win))
             continue;
         switch (ev.type) {
+            case MapNotify:
+            case CreateNotify:
+                if (ev.xcreatewindow.window != win) {
+                    XRaiseWindow(dpy, win);
+                }
+                break;
             case DestroyNotify:
                 if (ev.xdestroywindow.window != win)
                     break;
@@ -984,6 +990,8 @@ setup(void) {
             XFree(dws);
         }
         grabfocus();
+    } else {
+        XSelectInput(dpy, parentwin, SubstructureNotifyMask);
     }
     drw_resize(drw, mw, mh);
     drawmenu();
