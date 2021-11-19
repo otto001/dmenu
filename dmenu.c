@@ -966,6 +966,7 @@ setup(void) {
                         CWOverrideRedirect | CWBackPixel | CWEventMask, &swa);
     XSetClassHint(dpy, win, &ch);
 
+    XChangeProperty(dpy, win, XA_WM_NAME, XA_STRING, 8, PropModeReplace, (unsigned char *)title, sizeof(title));
 
     /* input methods */
     if ((xim = XOpenIM(dpy, NULL, NULL, NULL)) == NULL)

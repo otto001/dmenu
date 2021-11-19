@@ -24,3 +24,5 @@ static unsigned int lines      = 20;
  * for example: " /?\"&[]"
  */
 static const char worddelimiters[] = " ";
+
+static const char title[] = "dmenu";
